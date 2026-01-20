@@ -1,0 +1,57 @@
+Project: IOT over MQTT
+Goals: 
+1) Run a Mosquitto Broker on a LAN in order to iot devices to publish data;
+2) Create a backend using GO to subscribe to the topic, retrieve the data and save the data.
+3) Create a frontend using Next.js to display the data and interact with the iot devices to publish new topics and 
+
+Environment:
+## Hardware Information:
+- **Hardware Model:**                              HP HP Laptop 14-bw0xx
+- **Memory:**                                      8.0 GiB
+- **Processor:**                                   AMD E2-9000e RADEON R2, 4 COMPUTE CORES 2C+2G × 2
+- **Graphics:**                                    AMD Radeon™ R2 Graphics
+- **Disk Capacity:**                               500.1 GB
+
+## Software Information:
+- **Firmware Version:**                            F.26
+- **OS Name:**                                     Ubuntu 24.04.3 LTS
+- **OS Build:**                                    (null)
+- **OS Type:**                                     64-bit
+- **GNOME Version:**                               46
+- **Windowing System:**                            Wayland
+- **Kernel Version:**                              Linux 6.14.0-37-generic
+
+Tech stack: 
+
+Mosquitto MQTT Manual URL:
+https://mosquitto.org/man/
+
+Docker Manual URL:
+https://docs.docker.com/manuals/
+
+MariaDB Manual URL:
+https://mariadb.com/docs
+
+Next.js Docs URL:
+https://nextjs.org/docs
+
+Node version: v24.13.0
+npm version: 11.6.2
+
+go version go1.25.6 linux/amd64
+
+Shelly MQTT Docs URL:
+https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/
+
+Shelly Gen2 devices Docs URL:
+https://shelly-api-docs.shelly.cloud/gen2/
+
+Test Device:
+https://shelly-api-docs.shelly.cloud/gen2/Devices/Gen2/ShellyPlus1PM
+IP: 192.168.0.139
+MQTT: 192.168.0.139:1883
+RPC status notification over MQTT: Enabled
+Generic status over MQTT: Enabled
+SSL Connectivity: Disabled
+
+

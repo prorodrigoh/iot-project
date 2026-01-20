@@ -1,0 +1,30 @@
+services:
+  mqtt-broker:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto_broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto-config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto-data:/mosquitto/data
+    restart: unless-stopped
+
+  database:
+    image: mariadb:latest
+    container_name: mariadb_iot
+    environment:
+      MARIADB_ROOT_PASSWORD: your_secure_password
+      MARIADB_DATABASE: iot_data
+      MARIADB_USER: go_backend
+      MARIADB_PASSWORD: go_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mariadb-data:/var/lib/mysql
+    # Applying the connection limits we discussed earlier
+    command: 
+      - "--max-connections=200"
+      - "--max-user-connections=50"
+      - "--wait-timeout=300"
+    restart: unless-stopped
