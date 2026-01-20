@@ -100,10 +100,73 @@ We encountered and resolved several specific issues during frontend development.
 
 ---
 
+## 7. Version Control & Permission Fixes
+
+We encountered permission errors when attempting to commit project files to Git, as Docker containers create root-owned data directories.
+
+### Git Permission Fix
+**Issue:** `Permission denied` when running `git add` on `mariadb-data/`.
+**Fix:** Created a `.gitignore` file to exclude persistent data directories.
+
+**`.gitignore` Content:**
+```gitignore
+mariadb-data/
+mosquitto-data/
+```
+
+### Git Identity
+Configured the local repository with user identity instructions:
+```bash
+git config --global user.name "Rodrigo Henriques"
+git config --global user.email "pro.rodrigoh@gmail.com"
+```
+
+---
+
+## 8. Backend Execution Guide
+
+The Go backend is a standalone process that must be running to ingest data from MQTT into the database.
+
+### Installation
+1. **Install Go:**
+   ```bash
+   sudo snap install go --classic
+   ```
+2. **Verify Version:**
+   ensure `go.mod` matches your installed version (e.g., `go 1.25.5`).
+
+### Running the Collector
+The backend must be run from within its directory to correctly resolve modules.
+
+```bash
+cd backend
+go mod tidy       # First time setup to download dependencies
+go run main.go    # Start the data collector
+```
+
+**Note:** The collector subscribes to the MQTT topic (`client.Subscribe`) and processes every message instantly. It does not polling; data is inserted as soon as the device broadcasts it.
+
+---
+
+## 9. Timezone Configuration (UTC vs EST)
+
+**Issue:** Dashboard displayed timestamps in UTC (e.g., 2:09 AM stored) instead of local EST (9:09 PM actual).
+
+**Reason:** 
+* Database runs in Docker (defaults to UTC).
+* Frontend displayed raw UTC time without offset conversion.
+
+**Fix:**
+1. **Frontend (`src/app/page.tsx`):** Updated `toLocaleTimeString` to explicitly format time for `America/New_York`.
+2. **Database Driver (`src/lib/db.ts`):** Added `timezone: 'Z'` to the config to enforce strict UTC parsing, preventing ambiguous local time conversions.
+
+---
+
 ## Final Project Structure
 
 ```text
 ~/Code/iot-project/
+├── .gitignore           # Excludes mariadb-data, mosquitto-data
 ├── docker-compose.yml
 ├── backend/
 │   ├── main.go          # MQTT to DB bridge

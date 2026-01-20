@@ -6,4 +6,5 @@ export const pool = mysql.createPool({
   password: 'go_password',
   database: 'iot_data',
   port: 3306,
+  timezone: 'Z',
 });

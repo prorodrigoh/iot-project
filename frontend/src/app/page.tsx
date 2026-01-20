@@ -37,7 +37,7 @@ export default async function Home() {
           <tbody>
             {logs.map((log) => (
               <tr key={log.id} className="border-b">
-                <td className="p-3">{new Date(log.timestamp).toLocaleTimeString()}</td>
+                <td className="p-3">{new Date(log.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/New_York' })}</td>
                 <td className="p-3 font-mono">{log.apower}</td>
                 <td className="p-3 font-mono">{log.voltage}</td>
               </tr>
