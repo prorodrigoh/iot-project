@@ -47,23 +47,18 @@ The database `iot_data` is created automatically by the Docker container, but yo
     ```
     Then run the SQL commands found in `migration.sql`.
 
-## 5. Configure IoT Device (Shelly Plus 1PM)
+6.  **Auto-Configuration (Recommended)**: 
+    Instead of manual setup, you can use the **New Subscription** -> **Scan IP** feature in the dashboard. The system will automatically configure these settings and reboot the device for you.
 
-You need to point your Shelly device to your computer so it can send data to the MQTT broker.
+## 6. Dashboard Configuration (First Run)
 
-1.  **Find Device IP**: Connect the Shelly to your Wi-Fi using the manufacturer's app or look for its IP in your router's client list.
-2.  **Access Web Interface**: Open a browser and type the device's IP address (e.g., `http://192.168.0.114`).
-3.  **Configure MQTT**:
-    *   Go to **Settings** -> **MQTT**.
-    *   Check **Enable MQTT Network**.
-    *   **Server**: Enter *your computer's* local IP address followed by `:1883` (e.g., `192.168.0.178:1883`).
-    *   **RPC Status**: Enable "Generic status update over RPC".
-    *   Click **Save**.
-4.  **Network Settings (Optional)**:
-    *   Go to **Settings** -> **Wi-Fi**.
-    *   You can set a **Static IP** here if you don't want the device's address to change.
+Before adding devices, tell the system your computer's IP:
+1.  Open the dashboard: [http://localhost:3000](http://localhost:3000)
+2.  Go to **Settings**.
+3.  Verify the **Detected Host IP**. If you are on a VPN or have multiple adapters, you may need to override this with your LAN IP.
+4.  Click **Save Configuration**.
 
-## 6. Start the Backend Data Collector
+## 7. Start the Backend Data Collector
 
 The Go service subscribes to the MQTT broker and saves data to the database.
 
