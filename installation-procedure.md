@@ -22,8 +22,16 @@ cd iot-project
 Start the MQTT Broker and MariaDB Database containers.
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
+
+> [!IMPORTANT]
+> **Conflict with Snap Mosquitto:** If you have Mosquitto installed via Ubuntu Snap, it may block port 1883. If `docker ps` doesn't show the port mapping or you get "Connection Refused", run:
+> ```bash
+> sudo snap stop mosquitto
+> sudo snap disable mosquitto
+> docker compose up -d --force-recreate
+> ```
 
 Check if containers are running:
 ```bash
@@ -40,12 +48,12 @@ The database `iot_data` is created automatically by the Docker container, but yo
     docker exec -i mariadb_iot mariadb -u go_backend -pgo_password iot_data < migration.sql
     ```
 
-2.  **Manual initialization** (If step 1 fails):
-    Access the MariaDB container:
-    ```bash
-    docker exec -it mariadb_iot mariadb -u go_backend -pgo_password iot_data
-    ```
     Then run the SQL commands found in `migration.sql`.
+
+3.  **Clean Reset** (Wipes all data and resets schema):
+    ```bash
+    mariadb -h 127.0.0.1 -u go_backend -pgo_password iot_data < clean_reset.sql
+    ```
 
 6.  **Auto-Configuration (Recommended)**: 
     Instead of manual setup, you can use the **New Subscription** -> **Scan IP** feature in the dashboard. The system will automatically configure these settings and reboot the device for you.
@@ -102,6 +110,13 @@ The Next.js web interface visualizes the data.
 
 ## 8. Troubleshooting
 
-*   **No Data?** Ensure your IoT device (Shelly Plus 1PM) is pointing to your machine's IP address on port `1883` (see Step 5) and that the backend (Step 6) is running.
-*   **Timezone Issues?** Timestamps are stored in UTC but displayed in US/Eastern time on the dashboard.
-*   **Database Error?** If the backend crashes on start, ensure you ran Step 4 to create the table.
+*   **No Data?** 
+    - Ensure your IoT device (Shelly Plus 1PM) is pointing to your machine's IP address on port `1883`.
+    - Verify the broker is listening externally: `ss -tulpn | grep 1883` (should show `0.0.0.0:1883` or `*:1883`).
+    - Verify connectivity with `nc -zv <HOST_IP> 1883`.
+*   **Mosquitto Logs?** If `docker logs mosquitto_broker` is empty, check the internal log file:
+    ```bash
+    docker exec mosquitto_broker cat /mosquitto/log/mosquitto.log
+    ```
+*   **Timezone Issues?** Timestamps are stored in UTC but displayed in local time on the dashboard.
+*   **Database Error?** Check if tables exist: `mariadb -h 127.0.0.1 -u go_backend -pgo_password iot_data -e "SHOW TABLES;"`
