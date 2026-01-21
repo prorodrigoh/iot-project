@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import "./globals.css";
+import { Sidebar } from "@/components/Sidebar";
 
 export const metadata: Metadata = {
-    title: "IoT Project",
-    description: "IoT Project Frontend",
+    title: "IoT Dashboard",
+    description: "Real-time IoT Monitoring",
 };
 
 export default function RootLayout({
@@ -12,7 +14,12 @@ export default function RootLayout({
 }>) {
     return (
         <html lang="en">
-            <body>{children}</body>
+            <body className="antialiased min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+                <Sidebar />
+                <main className="ml-64 p-8 min-h-screen transition-all duration-300">
+                    {children}
+                </main>
+            </body>
         </html>
     );
 }
