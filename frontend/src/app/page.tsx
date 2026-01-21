@@ -2,7 +2,7 @@ import { pool } from '@/lib/db';
 import Link from 'next/link';
 import { Activity, Zap, Cpu, Clock } from "lucide-react";
 
-export const revalidate = 5;
+export const dynamic = 'force-dynamic';
 
 async function getStats() {
   const [deviceRows] = await pool.query('SELECT COUNT(DISTINCT device_id) as count FROM power_logs');
@@ -20,7 +20,7 @@ async function getStats() {
 
 async function getSystemInfo() {
   try {
-    const res = await fetch('http://localhost:8080/api/system-info', { next: { revalidate: 30 } });
+    const res = await fetch('http://localhost:8080/api/system-info', { cache: 'no-store' });
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {

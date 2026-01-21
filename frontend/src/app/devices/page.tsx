@@ -5,11 +5,16 @@ import { Server, Activity, ArrowRight } from "lucide-react";
 export const revalidate = 5;
 
 async function getDevices() {
-    // Get distinct devices and their latest activity time
+    // Join devices with their topics and logs
     const [rows] = await pool.query(`
-    SELECT device_id, MAX(created_at) as last_seen, COUNT(*) as msg_count 
-    FROM power_logs 
-    GROUP BY device_id 
+    SELECT 
+        d.id as device_id,
+        d.name as device_name,
+        MAX(pl.created_at) as last_seen,
+        COUNT(pl.id) as msg_count
+    FROM devices d
+    LEFT JOIN power_logs pl ON d.id = pl.device_id
+    GROUP BY d.id, d.name
     ORDER BY last_seen DESC
   `);
     return rows as any[];
@@ -42,7 +47,7 @@ export default async function DevicesPage() {
                                     <Server className="w-6 h-6" />
                                 </div>
                                 <div>
-                                    <h3 className="text-lg font-bold text-white truncate max-w-[150px]" title={device.device_id}>{device.device_id}</h3>
+                                    <h3 className="text-lg font-bold text-white truncate max-w-[150px]" title={device.device_id}>{device.device_name}</h3>
                                     <div className="flex items-center space-x-1 text-xs text-green-400">
                                         <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
                                         <span>Online</span>

@@ -6,7 +6,7 @@ This guide will help you set up the full IoT monitoring stack (MQTT, MariaDB, Go
 
 Ensure you have the following installed:
 *   **Docker** & **Docker Compose**
-*   **Go** (v1.25 or later)
+*   **Go** (v1.25.5 or later)
 *   **Node.js** (v18 or later) & **npm**
 *   **Git**
 
@@ -33,28 +33,19 @@ You should see `mosquitto_broker` (port 1883) and `mariadb_iot` (port 3306).
 
 ## 4. Database Initialization
 
-The database `iot_data` is created automatically, but you need to create the table structure manually for the first time.
+The database `iot_data` is created automatically by the Docker container, but you need to initialize the table structure.
 
-1.  Access the MariaDB container:
+1.  **Initialize using migration script** (Recommended):
+    ```bash
+    docker exec -i mariadb_iot mariadb -u go_backend -pgo_password iot_data < migration.sql
+    ```
+
+2.  **Manual initialization** (If step 1 fails):
+    Access the MariaDB container:
     ```bash
     docker exec -it mariadb_iot mariadb -u go_backend -pgo_password iot_data
     ```
-
-2.  Run the following SQL command to create the logs table:
-    ```sql
-    CREATE TABLE power_logs (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        device_id VARCHAR(50),
-        apower FLOAT,
-        voltage FLOAT,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    ```
-
-3.  Exit the database shell:
-    ```bash
-    exit
-    ```
+    Then run the SQL commands found in `migration.sql`.
 
 ## 5. Configure IoT Device (Shelly Plus 1PM)
 

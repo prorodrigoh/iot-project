@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Settings, Save, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
 
 export default function SettingsPage() {
+    const router = useRouter();
     const [detectedIp, setDetectedIp] = useState("");
     const [overrideIp, setOverrideIp] = useState("");
     const [loading, setLoading] = useState(true);
@@ -43,7 +45,13 @@ export default function SettingsPage() {
             });
 
             if (res.ok) {
-                setStatus({ type: 'success', message: "Settings saved successfully!" });
+                setStatus({ type: 'success', message: "Settings saved successfully! Redirecting..." });
+                // Force Next.js to clear cache and re-fetch server data
+                router.refresh();
+                // Automatically navigate to Global Overview (Home) after 1.5 seconds
+                setTimeout(() => {
+                    router.push("/");
+                }, 1500);
             } else {
                 throw new Error("Failed to save settings");
             }

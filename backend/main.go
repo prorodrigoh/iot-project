@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -21,7 +23,12 @@ var (
 	mqttClient mqtt.Client
 )
 
-// --- Database Models ---
+type Device struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	IP        string    `json:"ip"`
+	CreatedAt time.Time `json:"created_at"`
+}
 
 type DashboardConfig struct {
 	DeviceID      string   `json:"device_id"`
@@ -31,6 +38,7 @@ type DashboardConfig struct {
 type DeviceSubscription struct {
 	Topic      string `json:"topic"`
 	DeviceName string `json:"device_name"`
+	DeviceIP   string `json:"device_ip"` // Added for auto-discovery
 }
 
 // --- HTTP Handlers ---
@@ -60,25 +68,38 @@ func handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Save to DB
-	_, err := db.Exec("INSERT INTO device_subscriptions (topic, device_name) VALUES (?, ?)", sub.Topic, sub.DeviceName)
+	log.Printf("Subscription request received: %+v", sub)
+
+	// 1. Generate Hash ID
+	hash := md5.Sum([]byte(sub.DeviceName))
+	deviceID := hex.EncodeToString(hash[:])
+
+	// 2. Save Device (with IP update if exists)
+	_, err := db.Exec("INSERT INTO devices (id, name, ip) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE ip = VALUES(ip)", deviceID, sub.DeviceName, sub.DeviceIP)
 	if err != nil {
-		// Ignore duplicate error for simplicity or handle it
+		log.Printf("Error saving device: %v", err)
+	}
+
+	// 3. Save Topic
+	_, err = db.Exec("INSERT IGNORE INTO subscribed_topics (device_id, topic) VALUES (?, ?)", deviceID, sub.Topic)
+	if err != nil {
 		log.Printf("Error saving subscription: %v", err)
 	}
 
-	// 2. Subscribe MQTT
+	// 4. Subscribe MQTT
 	subscribeToTopic(sub.Topic)
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"status": "subscribed"})
+	json.NewEncoder(w).Encode(map[string]string{"status": "subscribed", "device_id": deviceID})
 }
 
 func handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
 	deviceID := r.PathValue("id")
 	if deviceID == "" {
-		http.Error(w, "Missing device ID", http.StatusBadRequest)
-		return
+		pathParts := strings.Split(r.URL.Path, "/")
+		if len(pathParts) > 0 {
+			deviceID = pathParts[len(pathParts)-1]
+		}
 	}
 
 	if r.Method == http.MethodGet {
@@ -117,6 +138,56 @@ func handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	deviceID := r.PathValue("id")
+	if deviceID == "" {
+		pathParts := strings.Split(r.URL.Path, "/")
+		if len(pathParts) > 0 {
+			deviceID = pathParts[len(pathParts)-1]
+		}
+	}
+
+	log.Printf("Attempting to delete device: '%s'", deviceID)
+
+	// 1. Get all topics for this device to unsubscribe
+	rows, err := db.Query("SELECT topic FROM subscribed_topics WHERE device_id = ?", deviceID)
+	if err != nil {
+		log.Printf("Error querying topics for %s: %v", deviceID, err)
+		http.Error(w, fmt.Sprintf("Query topics failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	topicCount := 0
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err == nil {
+			unsubscribeFromTopic(t)
+			topicCount++
+		}
+	}
+
+	// 2. Delete Device (Cascades to topics)
+	if _, err := db.Exec("DELETE FROM devices WHERE id = ?", deviceID); err != nil {
+		log.Printf("Error deleting device %s: %v", deviceID, err)
+		http.Error(w, fmt.Sprintf("Delete device failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Clean up configs and logs
+	db.Exec("DELETE FROM dashboard_configs WHERE device_id = ?", deviceID)
+	db.Exec("DELETE FROM power_logs WHERE device_id = ?", deviceID)
+
+	log.Printf("Device %s and %d topics removed", deviceID, topicCount)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "removed"})
+}
+
 func handleDiscover(w http.ResponseWriter, r *http.Request) {
 	ip := r.URL.Query().Get("ip")
 	if ip == "" {
@@ -127,6 +198,7 @@ func handleDiscover(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 3 * time.Second}
 	var prefix string
 	var enabled bool
+	var deviceName string
 
 	// 1. Try Shelly Gen 2/3 (RPC)
 	// http://<ip>/rpc/MQTT.GetConfig
@@ -143,7 +215,28 @@ func handleDiscover(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Scanner: Found Gen 2/3 device at %s (prefix: %s)", ip, prefix)
 		}
 		resp.Body.Close()
+
+		// Also get device name
+		respName, errName := client.Get(fmt.Sprintf("http://%s/rpc/Shelly.GetConfig", ip))
+		if errName == nil && respName.StatusCode == http.StatusOK {
+			var resName struct {
+				Sys struct {
+					Device struct {
+						Name string `json:"name"`
+					} `json:"device"`
+					Name string `json:"name"` // Fallback for some versions
+				} `json:"sys"`
+			}
+			if json.NewDecoder(respName.Body).Decode(&resName) == nil {
+				deviceName = resName.Sys.Device.Name
+				if deviceName == "" {
+					deviceName = resName.Sys.Name
+				}
+			}
+			respName.Body.Close()
+		}
 	} else {
+		// ... existing error logging ...
 		if err != nil {
 			log.Printf("Scanner: Gen 2/3 check failed for %s: %v", ip, err)
 		} else {
@@ -166,6 +259,7 @@ func handleDiscover(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var resultGen1 struct {
+			Name string `json:"name"`
 			Mqtt struct {
 				Enable bool   `json:"enable"`
 				Id     string `json:"id"`
@@ -176,10 +270,10 @@ func handleDiscover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Gen 1 usually follows pattern "shellies/<mqtt-id>/"
 		prefix = fmt.Sprintf("shellies/%s", resultGen1.Mqtt.Id)
 		enabled = resultGen1.Mqtt.Enable
-		log.Printf("Scanner: Found Gen 1 device at %s (id: %s)", ip, resultGen1.Mqtt.Id)
+		deviceName = resultGen1.Name
+		log.Printf("Scanner: Found Gen 1 device at %s (id: %s, name: %s)", ip, resultGen1.Mqtt.Id, deviceName)
 	}
 
 	// Suggest topics
@@ -201,6 +295,7 @@ func handleDiscover(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"mqtt_enabled": enabled,
 		"topic_prefix": prefix,
+		"device_name":  deviceName,
 		"suggestions":  topics,
 	})
 }
@@ -261,10 +356,15 @@ func handleConfigureDevice(w http.ResponseWriter, r *http.Request) {
 	// Expects: { "device_ip": "192.168.x.x" }
 	var req struct {
 		DeviceIP string `json:"device_ip"`
+		Interval int    `json:"interval"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if req.Interval <= 0 {
+		req.Interval = 30
 	}
 
 	hostIP := getBrokerIP()
@@ -281,6 +381,8 @@ func handleConfigureDevice(w http.ResponseWriter, r *http.Request) {
 				"enable":       true,
 				"server":       mqttServer,
 				"topic_prefix": nil, // Keep existing or let it default
+				"rpc_ntf":      true,
+				"status_ntf":   true,
 			},
 		},
 	}
@@ -292,8 +394,14 @@ func handleConfigureDevice(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Post(fmt.Sprintf("http://%s/rpc", req.DeviceIP), "application/json", bytes.NewBuffer(body))
 
 	if err == nil && resp.StatusCode == http.StatusOK {
-		log.Printf("Successfully configured Gen 2/3 device %s", req.DeviceIP)
+		log.Printf("Successfully configured Gen 2/3 device %s. Triggering reboot...", req.DeviceIP)
 		resp.Body.Close()
+
+		// Trigger Reboot (Gen 2/3)
+		rebootPayload := map[string]interface{}{"id": 1, "method": "Shelly.Reboot"}
+		rbBody, _ := json.Marshal(rebootPayload)
+		client.Post(fmt.Sprintf("http://%s/rpc", req.DeviceIP), "application/json", bytes.NewBuffer(rbBody))
+
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "configured", "type": "gen2"})
 		return
@@ -303,12 +411,16 @@ func handleConfigureDevice(w http.ResponseWriter, r *http.Request) {
 	// Needs form data: enabled=1&server=192.168.x.x:1883
 	// Note: Gen 1 uses GET arguments or POST form data usually
 
-	gen1Url := fmt.Sprintf("http://%s/settings/mqtt?mqtt_enable=true&mqtt_server=%s", req.DeviceIP, mqttServer)
+	gen1Url := fmt.Sprintf("http://%s/settings/mqtt?mqtt_enable=true&mqtt_server=%s&mqtt_update_period=%d", req.DeviceIP, mqttServer, req.Interval)
 	respGen1, errGen1 := client.Get(gen1Url) // Using GET for simplicity as many Shellies accept it
 
 	if errGen1 == nil && respGen1.StatusCode == http.StatusOK {
-		log.Printf("Successfully configured Gen 1 device %s", req.DeviceIP)
+		log.Printf("Successfully configured Gen 1 device %s (Interval: %d). Triggering reboot...", req.DeviceIP, req.Interval)
 		respGen1.Body.Close()
+
+		// Trigger Reboot (Gen 1)
+		client.Get(fmt.Sprintf("http://%s/reboot", req.DeviceIP))
+
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "configured", "type": "gen1"})
 		return
@@ -326,20 +438,27 @@ func handleConfigureDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleBackfill(w http.ResponseWriter, r *http.Request) {
-	// Helper to get available devices from logs
-	rows, err := db.Query("SELECT DISTINCT device_id FROM power_logs")
+	// Return a list of all devices (hash IDs)
+	rows, err := db.Query("SELECT id, name, ip FROM devices")
 	if err != nil {
+		log.Printf("Error fetching devices: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	var devices []string
+	var devices []Device
 	for rows.Next() {
-		var d string
-		rows.Scan(&d)
-		devices = append(devices, d)
+		var d Device
+		var ip sql.NullString
+		if err := rows.Scan(&d.ID, &d.Name, &ip); err == nil {
+			if ip.Valid {
+				d.IP = ip.String
+			}
+			devices = append(devices, d)
+		}
 	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(devices)
 }
 
@@ -359,43 +478,46 @@ func subscribeToTopic(topic string) {
 	}
 }
 
+func unsubscribeFromTopic(topic string) {
+	if mqttClient == nil || !mqttClient.IsConnected() {
+		return
+	}
+	token := mqttClient.Unsubscribe(topic)
+	token.Wait()
+	if token.Error() != nil {
+		log.Printf("Error unsubscribing from %s: %v", topic, token.Error())
+	} else {
+		log.Printf("Unsubscribed from %s", topic)
+	}
+}
+
 var messageHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 	payload := string(msg.Payload())
 	topic := msg.Topic()
 
-	// Heuristic to extract a "device_id" from topic.
-	// E.g. "shellyplus1pm-a8032ab5f58c/status/switch:0" -> "shellyplus1pm-a8032ab5f58c"
-	// This is a naive implementation; user might want 'device_name' from DB.
+	log.Printf("MQTT message received on topic %s", topic)
 
-	// Better approach: Check if we have a mapped name in device_subscriptions
+	// Find the hash device_id for this topic
 	var deviceID string
-	err := db.QueryRow("SELECT device_name FROM device_subscriptions WHERE topic = ?", topic).Scan(&deviceID)
+	err := db.QueryRow("SELECT device_id FROM subscribed_topics WHERE topic = ?", topic).Scan(&deviceID)
 	if err != nil {
-		// Fallback: use the part before first slash
-		parts := strings.Split(topic, "/")
-		if len(parts) > 0 {
-			deviceID = parts[0]
-		} else {
-			deviceID = "unknown"
-		}
+		log.Printf("Topic %s not found in subscribed_topics: %v", topic, err)
+		// Fallback: search for device_id (hash) in power_logs or infer (less reliable)
+		deviceID = "unknown"
 	}
 
-	// Determine if payload is JSON
 	if !json.Valid([]byte(payload)) {
-		// Log warning or wrap it
-		log.Printf("Received non-JSON payload on %s: %s", topic, payload)
-		// Option: wrap in object, e.g. {"value": ...} or ignore.
-		// For now, let's assume it MUST be JSON or we wrap it
 		payload = fmt.Sprintf(`{"raw_value": "%s"}`, strings.ReplaceAll(payload, `"`, `\"`))
 	}
 
+	log.Printf("Saving log for device %s (topic: %s)", deviceID, topic)
 	_, err = db.Exec("INSERT INTO power_logs (device_id, topic, payload) VALUES (?, ?, ?)",
 		deviceID, topic, payload)
 
 	if err != nil {
-		log.Printf("Error saving log: %v", err)
+		log.Printf("ERROR saving log to database: %v", err)
 	} else {
-		// log.Printf("Saved log for %s", deviceID)
+		log.Printf("Successfully saved log to power_logs table")
 	}
 }
 
@@ -439,18 +561,14 @@ func main() {
 	log.Println("Connected to MQTT Broker")
 
 	// 3. Load Valid Subscriptions from DB
-	rows, err := db.Query("SELECT topic FROM device_subscriptions")
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
+	rows2, err2 := db.Query("SELECT topic FROM subscribed_topics")
+	if err2 == nil {
+		defer rows2.Close()
+		for rows2.Next() {
 			var t string
-			rows.Scan(&t)
+			rows2.Scan(&t)
 			subscribeToTopic(t)
 		}
-	} else {
-		// If table is empty or error, maybe subscribe to default?
-		// Let's just log.
-		log.Printf("No existing subscriptions found or error: %v", err)
 	}
 
 	// 4. HTTP Server
@@ -458,6 +576,7 @@ func main() {
 	router.HandleFunc("POST /api/subscribe", handleSubscribe)
 	router.HandleFunc("GET /api/devices/{id}/config", handleDashboardConfig)
 	router.HandleFunc("POST /api/devices/{id}/config", handleDashboardConfig)
+	router.HandleFunc("DELETE /api/devices/{id}", handleDeleteDevice)
 	router.HandleFunc("GET /api/devices", handleBackfill)
 	router.HandleFunc("GET /api/discover", handleDiscover)
 	router.HandleFunc("GET /api/system-info", handleSystemInfo)

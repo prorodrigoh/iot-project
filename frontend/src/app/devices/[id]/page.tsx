@@ -2,7 +2,7 @@ import { pool } from '@/lib/db';
 import DeviceDashboard from '@/components/DeviceDashboard';
 import { redirect } from 'next/navigation';
 
-export const revalidate = 0; // Always fresh data for this one? Or allow 5s.
+export const dynamic = 'force-dynamic';
 
 // Helper to flatten JSON keys
 function flattenKeys(obj: any, prefix = ''): string[] {
@@ -20,14 +20,20 @@ function flattenKeys(obj: any, prefix = ''): string[] {
 }
 
 async function getDeviceData(id: string) {
-    // 1. Get logs
+    // 1. Get Device Name and IP
+    const [deviceRows] = await pool.query('SELECT name, ip FROM devices WHERE id = ?', [id]);
+    const device = (deviceRows as any[])[0];
+    const deviceName = device?.name || "Unknown Device";
+    const deviceIp = device?.ip || "";
+
+    // 2. Get logs
     const [logs] = await pool.query('SELECT * FROM power_logs WHERE device_id = ? ORDER BY created_at DESC LIMIT 50', [id]);
 
-    // 2. Get Config
+    // 3. Get Config
     const [configRows] = await pool.query('SELECT visible_fields FROM dashboard_configs WHERE device_id = ?', [id]);
     const config = (configRows as any[])[0]?.visible_fields || [];
 
-    // 3. Get Keys (from latest log)
+    // 4. Get Keys (from latest log)
     let allKeys: string[] = [];
     if ((logs as any[]).length > 0) {
         try {
@@ -37,21 +43,24 @@ async function getDeviceData(id: string) {
         } catch (e) { }
     }
 
-    return { logs: logs as any[], config: typeof config === 'string' ? JSON.parse(config) : config, allKeys };
+    return {
+        deviceName,
+        deviceIp,
+        logs: logs as any[],
+        config: typeof config === 'string' ? JSON.parse(config) : config,
+        allKeys
+    };
 }
 
 export default async function DevicePage({ params }: { params: { id: string } }) {
-    const { id } = await params; // Next.js 15+ params are promises? Or standard. Safe to await.
-    const { logs, config, allKeys } = await getDeviceData(id);
-
-    if (logs.length === 0 && allKeys.length === 0) {
-        // Optional: Handle "Device Found but no logs yet" vs "Unknown Device"
-        // For now just render empty
-    }
+    const { id } = await params;
+    const { deviceName, deviceIp, logs, config, allKeys } = await getDeviceData(id);
 
     return (
         <DeviceDashboard
             deviceId={id}
+            deviceName={deviceName}
+            deviceIp={deviceIp}
             initialConfig={config}
             logs={logs}
             allKeys={allKeys}

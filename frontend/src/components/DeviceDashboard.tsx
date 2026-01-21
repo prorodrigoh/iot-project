@@ -1,21 +1,25 @@
 "use client";
 
 import { useState } from 'react';
-import { Settings, Save, X, GripVertical, Check } from "lucide-react";
+import { Settings, Save, X, GripVertical, Check, Trash2 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
 
 interface DeviceDashboardProps {
     deviceId: string;
+    deviceName: string;
+    deviceIp: string;
     initialConfig: string[]; // List of visible keys
     logs: any[]; // Historical data
     allKeys: string[]; // All available keys from latest JSON
 }
 
-export default function DeviceDashboard({ deviceId, initialConfig, logs, allKeys }: DeviceDashboardProps) {
+export default function DeviceDashboard({ deviceId, deviceName, deviceIp, initialConfig, logs, allKeys }: DeviceDashboardProps) {
     const [visibleFields, setVisibleFields] = useState<string[]>(initialConfig.length > 0 ? initialConfig : allKeys.slice(0, 3));
     const [isConfigOpen, setIsConfigOpen] = useState(false);
     const [saving, setSaving] = useState(false);
+    const router = useRouter();
 
     // Helper to get value from nested object using dot notation
     const getValue = (obj: any, path: string) => {
@@ -36,6 +40,28 @@ export default function DeviceDashboard({ deviceId, initialConfig, logs, allKeys
             alert("Failed to save configuration");
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleRemoveDevice = async () => {
+        if (!window.confirm(`Are you sure you want to remove ${deviceName}? This will delete all its logs and unsubscribe from its topics.`)) {
+            return;
+        }
+
+        try {
+            const res = await fetch(`http://localhost:8080/api/devices/${encodeURIComponent(deviceId)}`, {
+                method: 'DELETE',
+            });
+            if (res.ok) {
+                router.push('/devices');
+                router.refresh();
+            } else {
+                const errorMsg = await res.text();
+                throw new Error(errorMsg || "Failed to remove device");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error removing device: " + (e as Error).message);
         }
     };
 
@@ -67,16 +93,36 @@ export default function DeviceDashboard({ deviceId, initialConfig, logs, allKeys
             {/* Header */}
             <div className="flex justify-between items-center mb-8">
                 <div>
-                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">{deviceId}</h1>
-                    <p className="text-slate-400">Device Dashboard</p>
+                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">{deviceName}</h1>
+                    {deviceIp ? (
+                        <a
+                            href={`http://${deviceIp}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-400 text-sm hover:underline mt-1 block font-mono"
+                        >
+                            {deviceIp}
+                        </a>
+                    ) : (
+                        <p className="text-slate-400 text-xs font-mono mt-1 opacity-50">{deviceId}</p>
+                    )}
                 </div>
-                <button
-                    onClick={() => setIsConfigOpen(true)}
-                    className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-colors border border-slate-700"
-                >
-                    <Settings className="w-4 h-4" />
-                    <span>Customize View</span>
-                </button>
+                <div className="flex space-x-3">
+                    <button
+                        onClick={() => setIsConfigOpen(true)}
+                        className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition-colors border border-slate-700 font-medium"
+                    >
+                        <Settings className="w-4 h-4" />
+                        <span>Customize View</span>
+                    </button>
+                    <button
+                        onClick={handleRemoveDevice}
+                        className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-red-900/20 hover:bg-red-900/40 text-red-400 transition-colors border border-red-900/30 font-medium"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Remove Device</span>
+                    </button>
+                </div>
             </div>
 
             {/* Main Grid */}
